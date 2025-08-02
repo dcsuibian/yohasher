@@ -1,15 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-
-interface FileEntity {
-  id: number
-  name: string
-  path: string
-  size: number
-  lastModified: number
-  md5: string | null
-  sha1: string | null
-  sha256: string | null
-}
+import type { FileEntity } from '@/types'
 
 const db = new Dexie('YoHasher') as Dexie & {
   files: EntityTable<FileEntity, 'id'>
@@ -26,6 +16,5 @@ async function getFileEntityByPath(path: string): Promise<FileEntity | null> {
   return fileEntity
 }
 
-export type { FileEntity }
 export { db }
 export { getFileEntityByPath }
