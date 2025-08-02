@@ -32,7 +32,7 @@ async function run() {
     if (done) {
       break
     }
-    byteCount += value.length
+    byteCount += value!.byteLength
     if (byteCount > lastSend + 10 * 1024 * 1024) {
       const message: HashWorkerOutgoingMessage = {
         type: 'hashing',

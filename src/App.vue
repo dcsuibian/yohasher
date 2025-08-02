@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { db, getFileEntityByPath } from '@/db'
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import ProgressBar from '@/components/ProgressBar/index.vue'
 import HashWorker from '@/workers/hash.worker?worker'
 import type { HashAlgorithm, HashJob, HashWorkerIncomingMessage, HashWorkerOutgoingMessage } from '@/types'
+import * as XLSX from 'xlsx'
 
 const totalCount = ref(0) // 文件总数
 const totalSize = ref(0) // 文件总大小
@@ -258,6 +259,8 @@ async function selectFolder() {
     failedJobs = []
     errorMessages = []
     jobCount = 0
+    skippedCount.value = 0
+    skippedSize.value = 0
 
     const dirHandle = await window.showDirectoryPicker()
     // 先准备工作线程
@@ -284,8 +287,39 @@ async function selectFolder() {
 }
 
 async function clear() {
+  if (!window.confirm('确定要清除缓存吗？此操作将删除所有已计算的哈希值。')) {
+    return
+  }
   await db.files.clear()
   alert('缓存已清空')
+}
+
+async function exportAsJson() {
+  const files = await db.files.toArray()
+  const blob = new Blob([JSON.stringify(files)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'hashes.json'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function exportAsExcel() {
+  const files = await db.files.toArray()
+  const data = files.map(file => ({
+    name: file.name,
+    path: file.path,
+    size: file.size,
+    lastModified: new Date(file.lastModified).toLocaleString(),
+    MD5: file.md5 || '未计算',
+    'SHA-1': file.sha1 || '未计算',
+    'SHA-256': file.sha256 || '未计算',
+  }))
+  const sheet = XLSX.utils.json_to_sheet(data)
+  const workBook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workBook, sheet, 'Hashes')
+  XLSX.writeFile(workBook, 'hashes.xlsx')
 }
 
 onMounted(() => {
@@ -304,43 +338,107 @@ watch(workerCount, newValue => localStorage.setItem('workerCount', JSON.stringif
 </script>
 
 <template>
-  <main>
-    <label>
-      <input type="checkbox" v-model="hashAlgorithms" value="SHA-256" :disabled="processing" />
-      SHA-256
-    </label>
-    <label>
-      <input type="checkbox" v-model="hashAlgorithms" value="SHA-1" :disabled="processing" />
-      SHA-1
-    </label>
-    <label>
-      <input type="checkbox" v-model="hashAlgorithms" value="MD5" :disabled="processing" />
-      MD5
-    </label>
-    <label>
-      读取线程数：
-      <select v-model="workerCount" :disabled="processing">
-        <option v-for="count of [1, 2, 4, 8]" :key="count" :value="count">
-          {{ count }}
-        </option>
-      </select>
-      <span v-if="1 === workerCount"> 单线程，适合HDD </span>
-      <span v-else> 多线程，适合SSD </span>
-    </label>
-    <button @click="selectFolder" :disabled="processing">选择文件夹</button>
-    <button @click="clear" :disabled="processing">清除缓存</button>
-    <div>
+  <main class="container">
+    <div class="options">
+      <label>
+        <input type="checkbox" v-model="hashAlgorithms" value="SHA-256" :disabled="processing" />
+        SHA-256
+      </label>
+      <label>
+        <input type="checkbox" v-model="hashAlgorithms" value="SHA-1" :disabled="processing" />
+        SHA-1
+      </label>
+      <label>
+        <input type="checkbox" v-model="hashAlgorithms" value="MD5" :disabled="processing" />
+        MD5
+      </label>
+    </div>
+    <div class="thread-setting">
+      <label>
+        读取线程数：
+        <select v-model="workerCount" :disabled="processing">
+          <option v-for="count of [1, 2, 4, 8]" :key="count" :value="count">
+            {{ count }}
+          </option>
+        </select>
+        <span v-if="1 === workerCount"> 单线程，适合HDD </span>
+        <span v-else> 多线程，适合SSD </span>
+      </label>
+    </div>
+    <div class="button-group">
+      <button @click="selectFolder" :disabled="processing">选择文件夹</button>
+      <button @click="clear" :disabled="processing">清除缓存</button>
+      <button @click="exportAsJson" :disabled="processing">导出为JSON</button>
+      <button @click="exportAsExcel" :disabled="processing">导出为Excel</button>
+    </div>
+    <div class="progress-section">
       <p>总进度：</p>
       <ProgressBar :current="totalProcessedSize + skippedSize" :total="totalSize" />
-      <div v-if="processing">
-        <template v-for="i of workers.length">
-          <p>工作线程{{ i }}：{{ workerJobs[i - 1]?.file.path }}</p>
-          <ProgressBar
-            :current="workerJobs[i - 1]?.processedByteCount || 0"
-            :total="workerJobs[i - 1]?.file.size || 0"
-          />
-        </template>
-      </div>
     </div>
+    <div class="worker-status" v-if="processing">
+      <template v-for="i of workers.length">
+        <p class="worker-path">
+          工作线程{{ i }}：
+          <span :title="workerJobs[i - 1]?.file.path">{{ workerJobs[i - 1]?.file.path }}</span>
+        </p>
+        <ProgressBar :current="workerJobs[i - 1]?.processedByteCount || 0" :total="workerJobs[i - 1]?.file.size || 0" />
+      </template>
+    </div>
+    <h1 style="font-size: 50px; margin-top: 30px">YoHasher</h1>
   </main>
 </template>
+
+<style scoped lang="scss">
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100vw;
+  height: 100vh;
+}
+
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin: 20px 0;
+
+  button {
+    padding: 8px 16px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    background-color: #f0f0f0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover:enabled {
+      background-color: #e0e0e0;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+  }
+}
+
+.progress-section {
+  width: 70%;
+}
+
+.worker-status {
+  width: 60%;
+}
+
+.worker-path {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  span[title] {
+    pointer-events: auto;
+  }
+}
+</style>
