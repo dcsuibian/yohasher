@@ -139,8 +139,17 @@ async function dfs(dirPath: string[], dirHandle: FileSystemDirectoryHandle) {
   for await (const handle of dirHandle.values()) {
     if ('file' === handle.kind) {
       const fileHandle = handle as FileSystemFileHandle
-      const file = await fileHandle.getFile()
-      const filePath = [...dirPath, file.name].join('/')
+      let file: File | null = null
+      const filePath = [...dirPath, fileHandle.name].join('/')
+      try {
+        file = await fileHandle.getFile()
+      } catch (e) {
+        console.error(`Failed to get file ${filePath}`)
+      }
+      if (null === file) {
+        // 如果获取文件失败，则跳过这个文件
+        continue
+      }
       await db.transaction('rw', db.files, async () => {
         // 先检查文件是否已存在
         if (null !== (await getFileEntityByPath(filePath))) {
