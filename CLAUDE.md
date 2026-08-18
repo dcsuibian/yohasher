@@ -20,6 +20,21 @@ npm run preview      # 预览构建产物
 
 Node 版本由 `.node-version` 固定为 v22.18.0（fnm 管理）。
 
+## 部署
+
+多阶段 Dockerfile：node 构建（`npm ci` + `npm run build-only`，不跑 type-check）→ nginx:alpine 托管 `dist`，监听 80。没有 CI/CD，本地构建后推镜像：
+
+```bash
+docker build -t ghcr.io/dcsuibian/yohasher:latest .
+docker push ghcr.io/dcsuibian/yohasher:latest
+```
+
+注意：
+
+- `xlsx` 依赖来自 `https://cdn.sheetjs.com/...tgz`（不在 npm registry），构建机需要能访问该域名。
+- File System Access API 只在安全上下文可用，服务器必须通过 HTTPS 暴露（由外层反代负责），否则「选择文件夹」按钮直接不可用。
+- 应用是纯静态的，没有后端接口，nginx 不需要任何反代配置。
+
 ## 架构
 
 核心是「主线程调度 + Worker 池执行」的生产者-消费者模型，全部集中在 `src/App.vue`（约 350 行的单文件应用，没有路由、没有状态管理库）。
